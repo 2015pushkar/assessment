@@ -1,0 +1,42 @@
+services:
+  api:
+    build: ./api-service
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - etl
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
+      - ETL_SERVICE_URL=http://etl:8000
+    restart: unless-stopped
+  
+  etl:
+    build: ./etl-service  
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+  
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:15
+    environment:
+      - POSTGRES_DB=clinical_data
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    tmpfs:
+      - /var/lib/postgresql/data:noexec,nosuid,size=512m
+    restart: unless-stopped
+
+
