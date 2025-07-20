@@ -70,48 +70,66 @@ async def transform_data(job_id: str, df: pd.DataFrame) -> Optional[pd.DataFrame
         # normalize column names
         df.columns = [c.lower().strip().replace(" ", "_") for c in df.columns]
 
-        # timestamp parsing
-        if "timestamp" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        # Parse timestamp to UTC
+        df['timestamp'] = df['timestamp'].apply(lambda t: parser.isoparse(t).astimezone(pytz.UTC))
+        # Coerce types
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df['quality_score'] = pd.to_numeric(df['quality_score'], errors='coerce')
+        # Clamp quality_score
+        df['quality_score'] = df['quality_score'].clip(lower=0, upper=1)
+       # Strip strings
+        for col in ['study_id','participant_id','measurement_type','unit','site_id']:
+            if col in df:
+                df[col] = df[col].astype(str).str.strip().str.lower()
 
-        # numeric coercion
-        for col in ["value", "quality_score"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        # trim string columns
-        str_cols = [c for c in df.columns if df[c].dtype == "object"]
-        for c in str_cols:
-            df[c] = df[c].astype(str).str.strip()
-
-        # metadata columns
-        df["processed_at"] = datetime.utcnow().isoformat()
-        df["job_id"] = job_id
-
-        # update job state
-        jobs[job_id]["progress"] = 30
-        jobs[job_id]["message"] = "Data transformed"
-        jobs[job_id]["transform_info"] = {
-            "columns_after": list(df.columns),
-            "row_count": len(df)
-        }
+        # Metadata
+        df['processed_at'] = datetime.utcnow()
+        jobs[job_id]['progress'] = 30
+        jobs[job_id]['message'] = 'Data transformed'
         logger.info(f"Job {job_id}: transformed {len(df)} rows")
-
-        
-        # DEV: print a preview to stdout
-        if os.getenv("DEVELOPMENT") == "true":
-            preview_rows = 10
-            logger.info(f"Job {job_id}: preview of transformed data (first {preview_rows} rows)\n{df.head(preview_rows)}")
-        # -----------------------------------------------------------------
-
         return df
-    except Exception as exc:
-        jobs[job_id]["status"] = "failed"
-        jobs[job_id]["message"] = f"Transform error: {exc}"
-        logger.exception(f"Job {job_id}: transform failed – {exc}")
+    except Exception as e:
+        jobs[job_id]['status'] = 'failed'
+        jobs[job_id]['message'] = f'Transform error: {e}'
+        logger.exception(f"Job {job_id}: transform failed")
         return None
 
+# python level validation logic
+VALID_MEASUREMENTS = {"glucose", "cholesterol", "weight", "height", "blood_pressure", "heart_rate"}
 
+RANGE_LIMITS = {
+    "glucose": (70, 200),
+    "cholesterol": (100, 300),
+    "weight": (30, 200),
+    "height": (100, 250),
+    "blood_pressure": (90, 120),
+    "heart_rate": (60, 100)
+}
+
+async def validate_data(job_id: str, df: pd.DataFrame) -> bool:
+    errors = []
+    # Required columns
+    for col in ['study_id','participant_id','measurement_type','value','timestamp']:
+        if col not in df.columns:
+            errors.append(f"Missing column {col}")
+    # Valid measurement types
+    bad_types = df[~df['measurement_type'].isin(VALID_MEASUREMENTS)]
+    if not bad_types.empty:
+        errors.append(f"Invalid types: {bad_types['measurement_type'].unique().tolist()}")
+    # Value range checks for numeric types
+    for m,(low,high) in RANGE_LIMITS.items():
+        if m in df['measurement_type'].values:
+            subset = df[df['measurement_type']==m]
+            if subset['value'].dropna().between(low,high).all() is False:
+                errors.append(f"Out-of-range values for {m}")
+    if errors:
+        jobs[job_id]['status']='failed'
+        jobs[job_id]['message']='; '.join(errors)
+        logger.error(f"Job {job_id}: validation errors {errors}")
+        return False
+    jobs[job_id]['progress']=50
+    jobs[job_id]['message']='Validation passed'
+    return True
 
 
 @app.post("/jobs", response_model=ETLJobResponse)
@@ -142,6 +160,7 @@ async def submit_job(job_request: ETLJobRequest):
     if df is None:
         raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
     # 3. Quality validation
+
     # 4. Database loading
     
     return ETLJobResponse(
