@@ -21,7 +21,19 @@ CREATE TABLE IF NOT EXISTS etl_jobs (
 -- - clinical_measurements (raw data)
 -- - processed_measurements (transformed data)
 -- - participants
+CREATE TABLE IF NOT EXISTS participants (
+    participant_id VARCHAR(50) PRIMARY KEY,
+    study_id VARCHAR(50) NOT NULL REFERENCES studies(study_id) ON DELETE CASCADE
+);
 -- - studies
+CREATE TABLE IF NOT EXISTS studies (
+    study_id VARCHAR(50) PRIMARY KEY
+);
+-- - sites
+CREATE TABLE IF NOT EXISTS sites (
+    site_id VARCHAR(50) PRIMARY KEY
+);
+
 -- - data_quality_reports
 -- - measurement_aggregations
 
