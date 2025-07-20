@@ -68,15 +68,58 @@ export class ETLService {
     return await this.dbService.getETLJob(jobId);
   }
 
-  // TODO: CANDIDATE TO IMPLEMENT
-  // /**
-  //  * Get ETL job status from ETL service
-  //  */
-  // async getJobStatus(jobId: string): Promise<{ status: string; progress?: number; message?: string }> {
-  //   // Implementation needed:
-  //   // 1. Validate jobId exists in database
-  //   // 2. Call ETL service to get real-time status
-  //   // 3. Handle connection errors gracefully
-  //   // 4. Return formatted status response
-  // }
+  /**
+   * Get ETL job status from ETL service
+   */
+  async getJobStatus(jobId: string): Promise<{ status: string; progress?: number; message?: string }> {
+    // 1. Validate jobId exists in database
+    const job = await this.dbService.getETLJob(jobId);
+    if (!job) {
+      throw new Error('Job not found');
+    }
+
+    try {
+      // 2. Call ETL service to get real-time status
+      const response = await axios.get(`${this.etlServiceUrl}/jobs/${jobId}/status`, {
+        timeout: 5000 // 5 second timeout
+      });
+
+      const { status, progress, message } = response.data;
+
+      // Update database if status has changed
+      if (status !== job.status) {
+        await this.dbService.updateETLJobStatus(jobId, status, message);
+      }
+
+      // 4. Return formatted status response
+      return {
+        status,
+        progress,
+        message
+      };
+    } catch (error: unknown) {
+      // 3. Handle connection errors gracefully
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as any;
+        if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ETIMEDOUT') {
+          // ETL service is unreachable, return database status
+          return {
+            status: job.status,
+            message: 'ETL service unavailable - showing last known status'
+          };
+        }
+        
+        if (axiosError.response?.status === 404) {
+          // Job not found in ETL service, might be completed or failed
+          return {
+            status: job.status,
+            message: 'Job not found in ETL service - showing database status'
+          };
+        }
+      }
+
+      // For other errors, rethrow
+      throw new Error(`Failed to get job status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
 }

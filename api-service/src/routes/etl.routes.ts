@@ -7,10 +7,10 @@ const etlController = new ETLController();
 // POST /api/etl/jobs - Submit new ETL job
 router.post('/jobs', etlController.submitJob);
 
-// GET /api/etl/jobs/:id - Get ETL job details
-router.get('/jobs/:id', etlController.getJob);
+// GET /api/etl/jobs/:id/status - Get ETL job status (must come before /:id route)
+router.get('/jobs/:id/status', etlController.getJobStatus);
 
-// TODO: Add status endpoint
-// GET /api/etl/jobs/:id/status - Get ETL job status (MISSING - CANDIDATE TO IMPLEMENT)
+// GET /api/etl/jobs/:id - Get ETL job details
+router.get('/jobs/:id', etlController.getJob); 
 
 export default router;
