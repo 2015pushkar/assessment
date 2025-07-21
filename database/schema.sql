@@ -1,43 +1,25 @@
--- Clinical Data ETL Pipeline Database Schema
--- TODO: Candidate to design and implement optimal schema
+-- Enable UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Basic schema provided for bootstrapping
--- Candidate should enhance with proper indexes, constraints, and optimization
-
--- ETL Jobs tracking table
-CREATE TABLE IF NOT EXISTS etl_jobs (
-    id UUID PRIMARY KEY,
-    filename VARCHAR(255) NOT NULL,
-    study_id VARCHAR(50),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP,
-    error_message TEXT
-);
-
--- TODO: Candidate to implement
--- Expected tables to be designed by candidate:
--- - clinical_measurements (raw data)
--- - processed_measurements (transformed data)
--- - participants
-CREATE TABLE IF NOT EXISTS participants (
-    participant_id VARCHAR(50) PRIMARY KEY,
-    study_id VARCHAR(50) NOT NULL REFERENCES studies(study_id) ON DELETE CASCADE
-);
--- - studies
+-- 1. Studies
 CREATE TABLE IF NOT EXISTS studies (
     study_id VARCHAR(50) PRIMARY KEY
 );
--- - sites
+
+-- 2. Sites
 CREATE TABLE IF NOT EXISTS sites (
     site_id VARCHAR(50) PRIMARY KEY
 );
 
--- - data_quality_reports
--- - measurement_aggregations
+-- 3. Participants
+CREATE TABLE IF NOT EXISTS participants (
+    participant_id VARCHAR(50) PRIMARY KEY,
+    study_id VARCHAR(50) NOT NULL,
+    CONSTRAINT fk_participant_study FOREIGN KEY (study_id)
+        REFERENCES studies(study_id) ON DELETE CASCADE
+);
 
--- Sample basic table structure (candidate should enhance)
+-- 4. Clinical Measurements
 CREATE TABLE IF NOT EXISTS clinical_measurements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     study_id VARCHAR(50) NOT NULL,
@@ -49,16 +31,41 @@ CREATE TABLE IF NOT EXISTS clinical_measurements (
     site_id VARCHAR(50) NOT NULL,
     quality_score DECIMAL(3,2),
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_cm_study FOREIGN KEY (study_id)
+        REFERENCES studies(study_id) ON DELETE CASCADE,
+    CONSTRAINT fk_cm_participant FOREIGN KEY (participant_id)
+        REFERENCES participants(participant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_cm_site FOREIGN KEY (site_id)
+        REFERENCES sites(site_id) ON DELETE CASCADE
 );
 
+-- 5. ETL Jobs
+CREATE TABLE IF NOT EXISTS etl_jobs (
+    id UUID PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL,
+    study_id VARCHAR(50),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    error_message TEXT,
+    CONSTRAINT fk_etl_study FOREIGN KEY (study_id)
+        REFERENCES studies(study_id) ON DELETE SET NULL
+);
 
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_clinical_measurements_study_id
+    ON clinical_measurements(study_id);
 
--- Basic indexes (candidate should optimize)
-CREATE INDEX IF NOT EXISTS idx_clinical_measurements_study_id ON clinical_measurements(study_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_measurements_participant_id ON clinical_measurements(participant_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_measurements_timestamp ON clinical_measurements(timestamp);
+CREATE INDEX IF NOT EXISTS idx_clinical_measurements_participant_id
+    ON clinical_measurements(participant_id);
 
--- ETL Jobs indexes
-CREATE INDEX IF NOT EXISTS idx_etl_jobs_status ON etl_jobs(status);
-CREATE INDEX IF NOT EXISTS idx_etl_jobs_created_at ON etl_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_clinical_measurements_timestamp
+    ON clinical_measurements(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_etl_jobs_status
+    ON etl_jobs(status);
+
+CREATE INDEX IF NOT EXISTS idx_etl_jobs_created_at
+    ON etl_jobs(created_at);

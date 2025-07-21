@@ -147,10 +147,6 @@ def load_data(job_id: str, df: pd.DataFrame):
     for s in df['study_id'].unique():
         cur.execute("INSERT INTO studies(study_id) VALUES (%s) ON CONFLICT DO NOTHING", (s,))
 
-    # Upsert participants
-    # for p in df['participant_id'].unique():
-    #     cur.execute("INSERT INTO participants(participant_id) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
-
     # Upsert study_participants
     for pid, sid in df[['participant_id', 'study_id']].drop_duplicates().values.tolist():
         cur.execute("""
@@ -181,6 +177,43 @@ def load_data(job_id: str, df: pd.DataFrame):
     jobs[job_id]['message'] = 'Loaded into DB'
     logger.info(f"Job {job_id}: loaded {len(df)} rows into database")
 
+def update_etl_job_status(job_id: str, status: str, progress: int = None, message: str = None):
+    """Update ETL job status in the database"""
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        conn = psycopg2.connect(database_url)
+    
+    cur = conn.cursor()
+    
+    # Update the etl_jobs table with proper fields
+    if status == 'completed':
+        # Set completed_at when job is completed
+        cur.execute("""
+            UPDATE etl_jobs 
+            SET status = %s, updated_at = %s, completed_at = %s
+            WHERE id = %s
+        """, (status, datetime.utcnow(), datetime.utcnow(), job_id))
+    elif status == 'failed':
+        # Set error_message when job fails
+        cur.execute("""
+            UPDATE etl_jobs 
+            SET status = %s, updated_at = %s, error_message = %s
+            WHERE id = %s
+        """, (status, datetime.utcnow(), message, job_id))
+    else:
+        # For other statuses (running, etc.)
+        cur.execute("""
+            UPDATE etl_jobs 
+            SET status = %s, updated_at = %s
+            WHERE id = %s
+        """, (status, datetime.utcnow(), job_id))
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    logger.info(f"Updated database status for job {job_id}: {status}")
+
 
 @app.post("/jobs", response_model=ETLJobResponse)
 async def submit_job(job_request: ETLJobRequest):
@@ -203,15 +236,21 @@ async def submit_job(job_request: ETLJobRequest):
     # This is where the candidate would implement:
     # 1. File extraction
     df = await extract_file(job_id, job_request.filename)
-    if df is None:                                    
+    if df is None:  
+        # Update database status to failed
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])                                  
         raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
     # 2. Data transformation 
     df = await transform_data(job_id, df)
     if df is None:
+        # Update database status to failed
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
         raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
     # 3. Quality validation
     ok = await validate_data(job_id, df)
-    if not ok: raise HTTPException(400, jobs[job_id]['message'])
+    if not ok: 
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
+        raise HTTPException(400, jobs[job_id]['message'])
 
     # 4. Database loading
     try:
@@ -219,21 +258,17 @@ async def submit_job(job_request: ETLJobRequest):
     except Exception as e:
         jobs[job_id]['status']='failed'
         jobs[job_id]['message']=f"Load error: {e}"
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
         logger.exception(f"Job {job_id}: load failed")
         raise HTTPException(500, jobs[job_id]['message'])
     # Finish
     jobs[job_id]['status']='completed'
     jobs[job_id]['progress']=100
     jobs[job_id]['message']='Job completed successfully'
+    # IMPORTANT: Update database status to completed
+    update_etl_job_status(job_id, "completed", progress=100, message="Job completed successfully")
     return ETLJobResponse(jobId=job_id, status='completed', message=jobs[job_id]['message'])
 
-    
-    
-    return ETLJobResponse(
-        jobId=job_id,
-        status="running",
-        message="Job submitted successfully"
-    )
 
 @app.get("/jobs/{job_id}/extract", include_in_schema=False)
 async def dev_extract(job_id: str):
