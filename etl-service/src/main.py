@@ -178,36 +178,36 @@ def load_data(job_id: str, df: pd.DataFrame):
     logger.info(f"Job {job_id}: loaded {len(df)} rows into database")
 
 def update_etl_job_status(job_id: str, status: str, progress: int = None, message: str = None):
-    """Update ETL job status in the database"""
     database_url = os.getenv('DATABASE_URL')
     if database_url:
         conn = psycopg2.connect(database_url)
     
     cur = conn.cursor()
     
-    # Update the etl_jobs table with proper fields
+    now = datetime.utcnow()
+    set_clauses = ["status = %s", "updated_at = %s"]
+    values = [status, now]
+
     if status == 'completed':
-        # Set completed_at when job is completed
-        cur.execute("""
-            UPDATE etl_jobs 
-            SET status = %s, updated_at = %s, completed_at = %s
-            WHERE id = %s
-        """, (status, datetime.utcnow(), datetime.utcnow(), job_id))
-    elif status == 'failed':
-        # Set error_message when job fails
-        cur.execute("""
-            UPDATE etl_jobs 
-            SET status = %s, updated_at = %s, error_message = %s
-            WHERE id = %s
-        """, (status, datetime.utcnow(), message, job_id))
-    else:
-        # For other statuses (running, etc.)
-        cur.execute("""
-            UPDATE etl_jobs 
-            SET status = %s, updated_at = %s
-            WHERE id = %s
-        """, (status, datetime.utcnow(), job_id))
-    
+        set_clauses.append("completed_at = %s")
+        values.append(now)
+
+    if progress is not None:
+        set_clauses.append("progress = %s")
+        values.append(progress)
+
+    if message is not None:
+        set_clauses.append("message = %s")
+        values.append(message)
+
+    query = f"""
+        UPDATE etl_jobs 
+        SET {', '.join(set_clauses)}
+        WHERE id = %s
+    """
+    values.append(job_id)
+
+    cur.execute(query, values)
     conn.commit()
     cur.close()
     conn.close()

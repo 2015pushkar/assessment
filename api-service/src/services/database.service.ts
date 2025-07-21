@@ -18,6 +18,16 @@ export class DatabaseService {
    * Create ETL job record
    */
   async createETLJob(job: ETLJob): Promise<void> {
+
+    // Step 1: Ensure study_id exists (to avoid FK violation)
+    if (job.studyId) {
+      await this.pool.query(
+        `INSERT INTO studies(study_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [job.studyId]
+      );
+    }
+
+    // Step 2: Insert the job
     const query = `
       INSERT INTO etl_jobs (id, filename, study_id, status, created_at, updated_at)
       VALUES ($1, $2, $3, $4, $5, $6)

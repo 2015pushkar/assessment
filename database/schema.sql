@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS etl_jobs (
     filename VARCHAR(255) NOT NULL,
     study_id VARCHAR(50),
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    progress INTEGER DEFAULT 0,
+    message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
