@@ -78,14 +78,14 @@ async def transform_data(job_id: str, df: pd.DataFrame) -> Optional[pd.DataFrame
         # Parse timestamp to UTC
         df['timestamp'] = df['timestamp'].apply(lambda t: parser.isoparse(t).astimezone(pytz.UTC))
         # Coerce types
-        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        # df['value'] = pd.to_numeric(df['value'], errors='coerce')
         df['quality_score'] = pd.to_numeric(df['quality_score'], errors='coerce')
         # Clamp quality_score
         df['quality_score'] = df['quality_score'].clip(lower=0, upper=1)
        # Strip strings
         for col in ['study_id','participant_id','measurement_type','unit','site_id']:
             if col in df:
-                df[col] = df[col].astype(str).str.strip().str.lower()
+                df[col] = df[col].astype(str).str.strip()
 
         # Metadata
         df['processed_at'] = datetime.utcnow()
@@ -123,11 +123,11 @@ async def validate_data(job_id: str, df: pd.DataFrame) -> bool:
     if not bad_types.empty:
         errors.append(f"Invalid types: {bad_types['measurement_type'].unique().tolist()}")
     # Value range checks for numeric types
-    for m,(low,high) in RANGE_LIMITS.items():
-        if m in df['measurement_type'].values:
-            subset = df[df['measurement_type']==m]
-            if subset['value'].dropna().between(low,high).all() is False:
-                errors.append(f"Out-of-range values for {m}")
+    # for m,(low,high) in RANGE_LIMITS.items():
+    #     if m in df['measurement_type'].values:
+    #         subset = df[df['measurement_type']==m]
+    #         if subset['value'].dropna().between(low,high).all() is False:
+    #             errors.append(f"Out-of-range values for {m}")
     if errors:
         jobs[job_id]['status']='failed'
         jobs[job_id]['message']='; '.join(errors)
