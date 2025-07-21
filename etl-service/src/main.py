@@ -147,13 +147,25 @@ def load_data(job_id: str, df: pd.DataFrame):
     for s in df['study_id'].unique():
         cur.execute("INSERT INTO studies(study_id) VALUES (%s) ON CONFLICT DO NOTHING", (s,))
 
-    # Upsert study_participants
-    for pid, sid in df[['participant_id', 'study_id']].drop_duplicates().values.tolist():
+    # Upsert participants
+    for pid in df['participant_id'].unique():
         cur.execute("""
-            INSERT INTO participants(participant_id, study_id)
-            VALUES (%s, %s)
+            INSERT INTO participants (participant_id)
+            VALUES (%s)
             ON CONFLICT DO NOTHING
-        """, (pid, sid))
+        """, (pid,))
+
+    #  Upsert participant enrollments
+    for (pid, sid), grp in df.groupby(['participant_id', 'study_id']):
+        first_seen = grp['timestamp'].min()        # pandas Timestamp
+        cur.execute("""
+            INSERT INTO participant_enrollments (participant_id, study_id, enrolled_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (participant_id, study_id) DO UPDATE
+                SET enrolled_at =
+                    LEAST(participant_enrollments.enrolled_at, EXCLUDED.enrolled_at)
+        """, (pid, sid, first_seen.to_pydatetime()))
+
 
     # Upsert sites
     for site in df['site_id'].unique():
