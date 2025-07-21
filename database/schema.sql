@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS clinical_measurements (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+
+
 -- Basic indexes (candidate should optimize)
 CREATE INDEX IF NOT EXISTS idx_clinical_measurements_study_id ON clinical_measurements(study_id);
 CREATE INDEX IF NOT EXISTS idx_clinical_measurements_participant_id ON clinical_measurements(participant_id);

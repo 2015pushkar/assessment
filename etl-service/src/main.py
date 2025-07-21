@@ -6,6 +6,11 @@ import os
 import pandas as pd
 import logging
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from dateutil import parser
+import pytz
+import psycopg2
+import io
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(asctime)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -84,6 +89,7 @@ async def transform_data(job_id: str, df: pd.DataFrame) -> Optional[pd.DataFrame
 
         # Metadata
         df['processed_at'] = datetime.utcnow()
+        df['created_at'] = datetime.utcnow()
         jobs[job_id]['progress'] = 30
         jobs[job_id]['message'] = 'Data transformed'
         logger.info(f"Job {job_id}: transformed {len(df)} rows")
@@ -131,6 +137,50 @@ async def validate_data(job_id: str, df: pd.DataFrame) -> bool:
     jobs[job_id]['message']='Validation passed'
     return True
 
+def load_data(job_id: str, df: pd.DataFrame):
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        conn = psycopg2.connect(database_url)
+    cur = conn.cursor()
+
+    # Upsert studies
+    for s in df['study_id'].unique():
+        cur.execute("INSERT INTO studies(study_id) VALUES (%s) ON CONFLICT DO NOTHING", (s,))
+
+    # Upsert participants
+    # for p in df['participant_id'].unique():
+    #     cur.execute("INSERT INTO participants(participant_id) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
+
+    # Upsert study_participants
+    for pid, sid in df[['participant_id', 'study_id']].drop_duplicates().values.tolist():
+        cur.execute("""
+            INSERT INTO participants(participant_id, study_id)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+        """, (pid, sid))
+
+    # Upsert sites
+    for site in df['site_id'].unique():
+        cur.execute("INSERT INTO sites(site_id) VALUES (%s) ON CONFLICT DO NOTHING", (site,))
+
+    # Bulk insert into clinical_measurements
+    buf = io.StringIO()
+    df_to_copy = df[['study_id','participant_id','measurement_type','value','unit','timestamp','site_id','quality_score','processed_at','created_at']]
+    df_to_copy.to_csv(buf, index=False, header=False)
+    buf.seek(0)
+    cur.copy_expert(
+        "COPY clinical_measurements(study_id,participant_id,measurement_type,value,unit,timestamp,site_id,quality_score,processed_at,created_at) FROM STDIN WITH CSV",
+        buf
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    jobs[job_id]['progress'] = 90
+    jobs[job_id]['message'] = 'Loaded into DB'
+    logger.info(f"Job {job_id}: loaded {len(df)} rows into database")
+
 
 @app.post("/jobs", response_model=ETLJobResponse)
 async def submit_job(job_request: ETLJobRequest):
@@ -160,8 +210,24 @@ async def submit_job(job_request: ETLJobRequest):
     if df is None:
         raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
     # 3. Quality validation
+    ok = await validate_data(job_id, df)
+    if not ok: raise HTTPException(400, jobs[job_id]['message'])
 
     # 4. Database loading
+    try:
+        load_data(job_id, df)
+    except Exception as e:
+        jobs[job_id]['status']='failed'
+        jobs[job_id]['message']=f"Load error: {e}"
+        logger.exception(f"Job {job_id}: load failed")
+        raise HTTPException(500, jobs[job_id]['message'])
+    # Finish
+    jobs[job_id]['status']='completed'
+    jobs[job_id]['progress']=100
+    jobs[job_id]['message']='Job completed successfully'
+    return ETLJobResponse(jobId=job_id, status='completed', message=jobs[job_id]['message'])
+
+    
     
     return ETLJobResponse(
         jobId=job_id,
