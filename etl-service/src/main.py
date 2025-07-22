@@ -11,6 +11,9 @@ from dateutil import parser
 import pytz
 import psycopg2
 import io
+import uuid         
+from psycopg2.extras import execute_values 
+import hashlib, uuid
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(asctime)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -143,6 +146,14 @@ def load_data(job_id: str, df: pd.DataFrame):
         conn = psycopg2.connect(database_url)
     cur = conn.cursor()
 
+    # Add deterministic UUIDs
+    if 'id' not in df.columns:
+        df.insert(
+            0, 'id',
+            df.apply(make_deterministic_id, axis=1)
+        )
+
+
     # Upsert studies
     for s in df['study_id'].unique():
         cur.execute("INSERT INTO studies(study_id) VALUES (%s) ON CONFLICT DO NOTHING", (s,))
@@ -173,15 +184,17 @@ def load_data(job_id: str, df: pd.DataFrame):
 
     # Bulk insert into clinical_measurements
     buf = io.StringIO()
-    df_to_copy = df[['study_id','participant_id','measurement_type','value','unit','timestamp','site_id','quality_score','processed_at','created_at']]
+    df_to_copy = df[['id','study_id','participant_id','measurement_type','value','unit','timestamp','site_id','quality_score','processed_at','created_at']]
     df_to_copy.to_csv(buf, index=False, header=False)
     buf.seek(0)
     cur.copy_expert(
-        "COPY clinical_measurements(study_id,participant_id,measurement_type,value,unit,timestamp,site_id,quality_score,processed_at,created_at) FROM STDIN WITH CSV",
+        "COPY clinical_measurements(id, study_id,participant_id,measurement_type,value,unit,timestamp,site_id,quality_score,processed_at,created_at) FROM STDIN WITH CSV",
         buf
     )
 
     conn.commit()
+    inserted_ids = df['id'].tolist()
+    upsert_measurement_aggs(inserted_ids)
     cur.close()
     conn.close()
 
@@ -225,6 +238,109 @@ def update_etl_job_status(job_id: str, status: str, progress: int = None, messag
     conn.close()
     
     logger.info(f"Updated database status for job {job_id}: {status}")
+
+def upsert_measurement_aggs(inserted_ids: list[str]) -> None:
+    """
+    Collapse the freshly-inserted clinical_measurements rows (identified
+    by their UUIDs) into daily buckets and merge them into the
+    measurement_aggregations table.
+
+    Call immediately after COPY + commit:
+        inserted_ids = df['id'].tolist()
+        upsert_measurement_aggs(inserted_ids)
+    """
+    if not inserted_ids:       # nothing new
+        return
+
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    with conn, conn.cursor() as cur:
+        # 1️⃣  collapse only the fresh rows
+        cur.execute(
+            """
+            WITH src AS (
+                SELECT *
+                FROM   clinical_measurements
+                WHERE  id = ANY(%s::uuid[])
+            ), agg AS (
+                SELECT
+                    DATE_TRUNC('day', "timestamp")::date   AS agg_day,
+                    study_id, site_id, participant_id, measurement_type,
+                    COUNT(*)                              AS measurement_count,
+                    AVG(value_num)                        AS avg_value,
+                    MIN(value_num)                        AS min_value,
+                    MAX(value_num)                        AS max_value,
+                    AVG(bp_systolic)                      AS avg_systolic,
+                    AVG(bp_diastolic)                     AS avg_diastolic,
+                    AVG(quality_score)                    AS avg_quality_score,
+                    SUM((quality_score < 0.95)::INT)       AS low_quality_count
+                FROM src
+                GROUP BY 1,2,3,4,5
+            )
+            SELECT * FROM agg;
+            """,
+            (inserted_ids,),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return
+
+        # 2️⃣  merge into measurement_aggregations
+        execute_values(
+            cur,
+            """
+            INSERT INTO measurement_aggregations (
+                agg_day, study_id, site_id, participant_id, measurement_type,
+                measurement_count, avg_value, min_value, max_value,
+                avg_systolic, avg_diastolic,
+                avg_quality_score, low_quality_count
+            )
+            VALUES %s
+            ON CONFLICT (agg_day, study_id, site_id, participant_id, measurement_type)
+            DO UPDATE SET
+              measurement_count  = measurement_aggregations.measurement_count
+                                   + EXCLUDED.measurement_count,
+              min_value          = LEAST(measurement_aggregations.min_value,
+                                         EXCLUDED.min_value),
+              max_value          = GREATEST(measurement_aggregations.max_value,
+                                           EXCLUDED.max_value),
+              low_quality_count  = measurement_aggregations.low_quality_count
+                                   + EXCLUDED.low_quality_count,
+              avg_value          = (
+                  measurement_aggregations.avg_value * measurement_aggregations.measurement_count
+                + EXCLUDED.avg_value * EXCLUDED.measurement_count
+              ) / (measurement_aggregations.measurement_count + EXCLUDED.measurement_count),
+              avg_systolic       = COALESCE(
+                  (measurement_aggregations.avg_systolic * measurement_aggregations.measurement_count
+                 + EXCLUDED.avg_systolic * EXCLUDED.measurement_count)
+                  / NULLIF(measurement_aggregations.measurement_count + EXCLUDED.measurement_count,0),
+                  measurement_aggregations.avg_systolic),
+              avg_diastolic      = COALESCE(
+                  (measurement_aggregations.avg_diastolic * measurement_aggregations.measurement_count
+                 + EXCLUDED.avg_diastolic * EXCLUDED.measurement_count)
+                  / NULLIF(measurement_aggregations.measurement_count + EXCLUDED.measurement_count,0),
+                  measurement_aggregations.avg_diastolic),
+              avg_quality_score  = (
+                  measurement_aggregations.avg_quality_score * measurement_aggregations.measurement_count
+                + EXCLUDED.avg_quality_score * EXCLUDED.measurement_count
+              ) / (measurement_aggregations.measurement_count + EXCLUDED.measurement_count);
+            """,
+            rows,
+        )
+
+def make_deterministic_id(row) -> str:
+    """
+    Build a v3-style UUID (MD5 namespace) from the unique content
+    of a clinical measurement row.
+    """
+    key = "|".join(
+        str(row[col]) for col in (
+            'study_id', 'participant_id', 'timestamp',
+            'measurement_type', 'value'
+        )
+    )
+    # MD5 hash → UUID object → str
+    return str(uuid.UUID(hashlib.md5(key.encode("utf-8")).hexdigest()))
+
 
 
 @app.post("/jobs", response_model=ETLJobResponse)

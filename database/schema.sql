@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS participants (
     participant_id VARCHAR(50) PRIMARY KEY
 );
 
--- 3b. Participant Enrollments
+-- 4. Participant Enrollments
 CREATE TABLE IF NOT EXISTS participant_enrollments (
     participant_id VARCHAR(50) NOT NULL,
     study_id       VARCHAR(50) NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS participant_enrollments (
     FOREIGN KEY (study_id)       REFERENCES studies(study_id)            ON DELETE CASCADE
 );
 
--- 4. Clinical Measurements
+-- 5. Clinical Measurements
 CREATE TABLE IF NOT EXISTS clinical_measurements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     study_id        VARCHAR(50) NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS clinical_measurements (
     FOREIGN KEY (site_id)                  REFERENCES sites(site_id)    ON DELETE CASCADE
 );
 
--- 5. ETL Jobs
+-- 6. ETL Jobs
 CREATE TABLE IF NOT EXISTS etl_jobs (
     id UUID PRIMARY KEY,
     filename     VARCHAR(255) NOT NULL,
@@ -77,6 +77,30 @@ CREATE TABLE IF NOT EXISTS etl_jobs (
     FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE SET NULL
 );
 
+-- 7. Measurement Aggregations
+CREATE TABLE IF NOT EXISTS measurement_aggregations (
+    agg_day            DATE,
+    study_id           VARCHAR(50),
+    site_id            VARCHAR(50),
+    participant_id     VARCHAR(50),
+    measurement_type   VARCHAR(50),
+
+    measurement_count  INTEGER NOT NULL,
+
+    avg_value          DOUBLE PRECISION,
+    min_value          DOUBLE PRECISION,
+    max_value          DOUBLE PRECISION,
+
+    avg_systolic       DOUBLE PRECISION,
+    avg_diastolic      DOUBLE PRECISION,
+
+    avg_quality_score  DOUBLE PRECISION,
+    low_quality_count  INTEGER,
+
+    PRIMARY KEY (agg_day, study_id, site_id, participant_id, measurement_type)
+);
+
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_cm_study_id       ON clinical_measurements (study_id);
 CREATE INDEX IF NOT EXISTS idx_cm_participant_id ON clinical_measurements (participant_id);
@@ -85,3 +109,5 @@ CREATE INDEX IF NOT EXISTS idx_cm_type_value     ON clinical_measurements (measu
 CREATE INDEX IF NOT EXISTS idx_cm_bp             ON clinical_measurements (bp_systolic, bp_diastolic);
 CREATE INDEX IF NOT EXISTS idx_etl_jobs_status   ON etl_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_etl_jobs_created  ON etl_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_ma_day_type ON measurement_aggregations (agg_day, measurement_type);
+CREATE INDEX IF NOT EXISTS idx_ma_participant ON measurement_aggregations (participant_id);
