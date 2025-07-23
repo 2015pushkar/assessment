@@ -95,7 +95,8 @@ The system provides real-time job status monitoring with comprehensive logging.
 **Job Status - Completed:**
 ![Status Completed](images/status_completed.png)
 
-**Query Clinical Data:**
+**Query Clinical Data:http://localhost:3000/api/data?studyId=STUDY001&measurementType=glucose**
+![Query Clinical Data](images/query_clinical_data.png)
 ```
 {
     "success": true,
@@ -196,6 +197,9 @@ The system answers critical business questions through optimized queries and ana
 - **Database indexing** for analytics queries
 - **Connection pooling** for database efficiency
 - **Asynchronous processing** for ETL jobs
+- **Simulated job progress delay** – the ETL worker inserts an optional  
+  `asyncio.sleep()` delay (_default 10 s_) so the status endpoint has
+  something to poll during demos.
 
 ### Monitoring & Observability
 - **Health check endpoints** for all services
