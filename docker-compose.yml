@@ -10,7 +10,7 @@ services:
       - NODE_ENV=development
       - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
       - ETL_SERVICE_URL=http://etl:8000
-      - DEVELOPMENT=true
+      - DEVELOPMENT=false
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
       - postgres
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
-      - DEVELOPMENT=true
+      - DEVELOPMENT=false
     volumes:
       - ./data:/data
     restart: unless-stopped

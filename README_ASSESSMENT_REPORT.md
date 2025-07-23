@@ -197,9 +197,6 @@ The system answers critical business questions through optimized queries and ana
 - **Database indexing** for analytics queries
 - **Connection pooling** for database efficiency
 - **Asynchronous processing** for ETL jobs
-- **Simulated job progress delay** – the ETL worker inserts an optional  
-  `asyncio.sleep()` delay (_default 10 s_) so the status endpoint has
-  something to poll during demos.
 
 ### Monitoring & Observability
 - **Health check endpoints** for all services

@@ -354,22 +354,24 @@ async def process_etl_job(job_id: str, filename: str, study_id: Optional[str] = 
         # Update database status to failed
         update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])                                  
         return
-
-    await asyncio.sleep(10)  # Small delay for demonstration
+    if os.getenv('DEVELOPMENT'):
+        await asyncio.sleep(10)  # Small delay for demonstration
     # 2. Data transformation 
     df = await transform_data(job_id, df)
     if df is None:
         # Update database status to failed
         update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
         return
-    await asyncio.sleep(10)
+    if os.getenv('DEVELOPMENT'):
+        await asyncio.sleep(10)
         
     # 3. Quality validation
     ok = await validate_data(job_id, df)
     if not ok: 
         update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
         return
-    await asyncio.sleep(10)
+    if os.getenv('DEVELOPMENT'):
+        await asyncio.sleep(10)
 
     # 4. Database loading
     try:
@@ -380,7 +382,8 @@ async def process_etl_job(job_id: str, filename: str, study_id: Optional[str] = 
         update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
         logger.exception(f"Job {job_id}: load failed")
         return
-    await asyncio.sleep(10)
+    if os.getenv('DEVELOPMENT'):
+        await asyncio.sleep(10)
         
     # Finish
     jobs[job_id]['status']='completed'
