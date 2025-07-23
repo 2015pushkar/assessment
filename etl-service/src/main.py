@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import uvicorn
@@ -14,6 +14,7 @@ import io
 import uuid         
 from psycopg2.extras import execute_values 
 import hashlib, uuid
+import asyncio
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(asctime)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -341,10 +342,56 @@ def make_deterministic_id(row) -> str:
     # MD5 hash → UUID object → str
     return str(uuid.UUID(hashlib.md5(key.encode("utf-8")).hexdigest()))
 
+async def process_etl_job(job_id: str, filename: str, study_id: Optional[str] = None):
+    """
+    Process an ETL job: extract, transform, validate, and load data.
+    Background task - does not return HTTP responses.
+    """
+    
+    # 1. File extraction
+    df = await extract_file(job_id, filename)
+    if df is None:  
+        # Update database status to failed
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])                                  
+        return
 
+    await asyncio.sleep(10)  # Small delay for demonstration
+    # 2. Data transformation 
+    df = await transform_data(job_id, df)
+    if df is None:
+        # Update database status to failed
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
+        return
+    await asyncio.sleep(10)
+        
+    # 3. Quality validation
+    ok = await validate_data(job_id, df)
+    if not ok: 
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
+        return
+    await asyncio.sleep(10)
+
+    # 4. Database loading
+    try:
+        load_data(job_id, df)
+    except Exception as e:
+        jobs[job_id]['status']='failed'
+        jobs[job_id]['message']=f"Load error: {e}"
+        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
+        logger.exception(f"Job {job_id}: load failed")
+        return
+    await asyncio.sleep(10)
+        
+    # Finish
+    jobs[job_id]['status']='completed'
+    jobs[job_id]['progress']=100
+    jobs[job_id]['message']='Job completed successfully'
+    # IMPORTANT: Update database status to completed
+    update_etl_job_status(job_id, "completed", progress=100, message="Job completed successfully")
+    logger.info(f"Job {job_id}: completed successfully")
 
 @app.post("/jobs", response_model=ETLJobResponse)
-async def submit_job(job_request: ETLJobRequest):
+async def submit_job(job_request: ETLJobRequest, background_tasks: BackgroundTasks):
     """
     Submit a new ETL job for processing
     """
@@ -360,66 +407,11 @@ async def submit_job(job_request: ETLJobRequest):
         "message": "Job started"
     }
     
-    # TODO: Implement actual ETL processing
-    # This is where the candidate would implement:
-    # 1. File extraction
-    df = await extract_file(job_id, job_request.filename)
-    if df is None:  
-        # Update database status to failed
-        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])                                  
-        raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
-    # 2. Data transformation 
-    df = await transform_data(job_id, df)
-    if df is None:
-        # Update database status to failed
-        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
-        raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
-    # 3. Quality validation
-    ok = await validate_data(job_id, df)
-    if not ok: 
-        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
-        raise HTTPException(400, jobs[job_id]['message'])
+    # Start ETL processing in background
+    background_tasks.add_task(process_etl_job, job_id, job_request.filename, job_request.studyId)
+    
+    return ETLJobResponse(jobId=job_id, status="running", message="Job started – processing in background")
 
-    # 4. Database loading
-    try:
-        load_data(job_id, df)
-    except Exception as e:
-        jobs[job_id]['status']='failed'
-        jobs[job_id]['message']=f"Load error: {e}"
-        update_etl_job_status(job_id, "failed", message=jobs[job_id]["message"])
-        logger.exception(f"Job {job_id}: load failed")
-        raise HTTPException(500, jobs[job_id]['message'])
-    # Finish
-    jobs[job_id]['status']='completed'
-    jobs[job_id]['progress']=100
-    jobs[job_id]['message']='Job completed successfully'
-    # IMPORTANT: Update database status to completed
-    update_etl_job_status(job_id, "completed", progress=100, message="Job completed successfully")
-    return ETLJobResponse(jobId=job_id, status='completed', message=jobs[job_id]['message'])
-
-
-@app.get("/jobs/{job_id}/extract", include_in_schema=False)
-async def dev_extract(job_id: str):
-    """DEV‑only endpoint to debug extraction. Enabled when DEVELOPMENT=true."""
-
-    if os.getenv("DEVELOPMENT") != "true":
-        raise HTTPException(status_code=404, detail="Endpoint disabled")
-
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    filename = jobs[job_id]["filename"]
-
-    df = await extract_file(job_id, filename)
-    if df is None:
-        raise HTTPException(status_code=400, detail=jobs[job_id]["message"])
-
-    return {
-        "jobId": job_id,
-        "rows_extracted": len(df),
-        "columns": list(df.columns),
-        "info": jobs[job_id]["message"],
-    }
 
 @app.get("/jobs/{job_id}/status", response_model=ETLJobStatus)
 async def get_job_status(job_id: str):
