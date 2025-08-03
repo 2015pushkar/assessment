@@ -1,6 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
+// import { File } from 'multer'; 
 import { ETLService } from '../services/etl.service';
+import { v4 as uuidv4 } from 'uuid';
+import { promises as fs } from 'fs';
+import path from 'path';
 import { successResponse, errorResponse } from '../utils/response';
+
+// extend only for this module
+type MulterRequest = Request & {
+    file?: Express.Multer.File;
+}
 
 export class ETLController {
   private etlService: ETLService;
@@ -13,16 +22,31 @@ export class ETLController {
    * Submit new ETL job
    * POST /api/etl/jobs
    */
-  submitJob = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  submitJob = async (req: MulterRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { filename, studyId } = req.body;
+      const file = req.file; // Multer will handle file upload
+      if (!file) {
+        errorResponse(res, 'File is required', 400);
+        return;
+      }
+      const { studyId } = req.body;
 
-      if (!filename) {
+      if (!file) {
         errorResponse(res, 'filename is required', 400);
         return;
       }
 
-      const job = await this.etlService.submitJob(filename, studyId);
+      // 1. Generate jobId and final filename
+      const jobId = uuidv4();
+      const orig  = path.basename(file.originalname);
+      const finalFilename = `${jobId}_${orig}`;
+      const finalPath = path.join('/data', finalFilename);
+
+      // 2. Move from Multer’s tmp dir → shared /data
+      await fs.rename(file.path, finalPath);
+
+      // 3. Kick off DB + ETL-service call
+      const job = await this.etlService.submitJob(jobId, finalFilename, studyId);
       successResponse(res, job, 'ETL job submitted successfully');
     } catch (error) {
       next(error);

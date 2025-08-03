@@ -25,8 +25,8 @@ export class ETLService {
   /**
    * Submit new ETL job
    */
-  async submitJob(filename: string, studyId?: string): Promise<ETLJob> {
-    const jobId = uuidv4();
+  async submitJob(jobId: string, filename: string, studyId?: string): Promise<ETLJob> {
+    // const jobId = uuidv4();
     
     // Create job record in database
     const job: ETLJob = {
