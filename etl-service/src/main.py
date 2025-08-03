@@ -71,7 +71,7 @@ async def transform_data(job_id: str, df: pd.DataFrame) -> Optional[pd.DataFrame
     Steps:
     1. Lower‑case and underscore column names
     2. Parse `timestamp` to pandas datetime
-    3. Coerce numeric columns (`value`, `quality_score`)
+    3. Coerce numeric columns (`quality_score`)
     4. Strip whitespace from string fields
     5. Add `processed_at` & `job_id` metadata columns
     """
@@ -94,6 +94,7 @@ async def transform_data(job_id: str, df: pd.DataFrame) -> Optional[pd.DataFrame
         # Metadata
         df['processed_at'] = datetime.utcnow()
         df['created_at'] = datetime.utcnow()
+        df['_jd_at'] = datetime.utcnow()
         jobs[job_id]['progress'] = 30
         jobs[job_id]['message'] = 'Data transformed'
         logger.info(f"Job {job_id}: transformed {len(df)} rows")

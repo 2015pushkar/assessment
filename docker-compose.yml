@@ -23,7 +23,7 @@ services:
       - postgres
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
-      - DEVELOPMENT=false
+      - DEVELOPMENT=true
     volumes:
       - ./data:/data
     restart: unless-stopped
