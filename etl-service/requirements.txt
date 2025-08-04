@@ -6,3 +6,5 @@ pydantic==2.5.0
 python-multipart==0.0.6
 sqlalchemy==2.0.23
 alembic==1.13.1
+redis==5.0.1
+rq==1.15.1
