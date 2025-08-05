@@ -1,12 +1,13 @@
-FROM public.ecr.aws/docker/library/python:3.11-slim
+FROM bitnami/spark:latest
 
+USER root
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY . .
+COPY ./src /app/src
 
+USER 1001               
 EXPOSE 8000
-
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn","src.main:app","--host","0.0.0.0","--port","8000","--reload"]

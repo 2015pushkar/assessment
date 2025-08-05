@@ -21,11 +21,19 @@ services:
       - "8000:8000"
     depends_on:
       - postgres
+      - spark-master
     environment:
+      - PYTHONPATH=/app/src:$PYTHONPATH
       - DATABASE_URL=postgresql://user:pass@postgres:5432/clinical_data
+      - SPARK_MASTER_URL=spark://spark-master:7077
       - DEVELOPMENT=true
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
     volumes:
       - ./data:/data
+      - ./etl-service:/app  # Mount your ETL scripts to Spark containers
+    working_dir: /app
+    command: ["uvicorn","src.main:app","--host","0.0.0.0","--port","8000"]
     restart: unless-stopped
   
   postgres:
@@ -43,4 +51,31 @@ services:
       - /var/lib/postgresql/data:noexec,nosuid,size=512m
     restart: unless-stopped
 
+  spark-master:
+    image: bitnami/spark:latest
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "7077:7077" # Spark master port
+      - "8080:8080" # Spark master web UI
+    volumes:
+      - ./data:/data
+      - ./etl-service:/app  # Mount ETL scripts
+    restart: unless-stopped
+
+  spark-worker:
+    image: bitnami/spark:latest
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081" # Spark worker web UI
+    volumes:
+      - ./data:/data
+      - ./etl-service:/app  # Mount ETL scripts
+    restart: unless-stopped
 
