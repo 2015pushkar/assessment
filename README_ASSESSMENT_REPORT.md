@@ -16,6 +16,8 @@ The pipeline consists of three core microservices:
 
 ![System Architecture](images/system_architecture.png)
 
+![Work Flow](images/work_flow.png)
+
 ## 🚀 Quick Start
 
 ### Prerequisites
