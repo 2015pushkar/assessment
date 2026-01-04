@@ -4,7 +4,7 @@
 Complete a partially-built microservices data pipeline for processing clinical trial data.
 
 ## Time Expectation
-**4-6 hours** to complete all three tasks.
+**10-12 hours** to complete all the tasks.
 
 **We encourage you to use AI assistants** such as ChatGPT, Claude, GitHub Copilot, etc. You are welcome to leverage AI tools throughout your development process to help solve problems, implement features, and optimize your workflow. Demonstrating effective use of AI can be a valuable part of this assessment. We're evaluating your problem-solving approach and implementation quality, not your ability to memorize syntax.
 
